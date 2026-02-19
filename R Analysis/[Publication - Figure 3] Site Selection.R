@@ -18,8 +18,10 @@ library(cowplot)
 
 # ---------- File paths ----------
 file_threats <- "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/ArcGIS Projects/CRR 2025_June/Bioregions_Threats.xlsx"
-file_mot     <- "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/[Original] 20250813 CRR Governance Database 2023-2025.xlsx"
-
+file_mot <- here(
+  "Data",
+  "[Original] 20250813 CRR Governance Database 2023-2025.xlsx"
+)
 # ---------- Palette & orders ----------
 threat_colors <- c(
   "Low"        = "#FFFFB2",
@@ -242,7 +244,7 @@ stacked_no_x_no_legend <- cowplot::plot_grid(
   rel_heights = c(1,1,1,1,1,1)
 )
 
-stacked_no_x_no_legend
+stacked_no_x_no_legend # for all the barplots in one output for the plot
 # =========================
 # B) STACKED — only Integrated Global has x-axis + legend
 # =========================
@@ -256,7 +258,7 @@ stacked_global_with_axis <- cowplot::plot_grid(
   p_over_B, p_past_B, p_int_B, p_2030_B,
   ncol = 1, align = "v"
 )
-
+stacked_global_with_axis # for threat level legend for the plot
 # =========================
 # C) STACKED — only Integrated Local has x-axis + legend
 # =========================
@@ -270,7 +272,7 @@ stacked_local_with_axis <- cowplot::plot_grid(
   p_over_C, p_past_C, p_int_C, p_2030_C,
   ncol = 1, align = "v"
 )
-
+stacked_local_with_axis # for threat level legend with low level for the plot
 # =========================
 # D) STACKED — like A but with a MOTIVATION legend at the bottom
 # =========================
@@ -287,7 +289,7 @@ stacked_like_A_with_mot_legend_only <- cowplot::plot_grid(
   rel_heights = c(1, 0.12)
 )
 
-stacked_like_A_with_mot_legend_only
+stacked_like_A_with_mot_legend_only # for motivation legend for the plot
 # =========================
 # E) STACKED — with motivations (no x, no legend)
 # =========================

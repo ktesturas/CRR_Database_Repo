@@ -2,17 +2,17 @@
 pacman::p_load(tidyverse, readxl, stringr, ggnewscale, grid)
 
 # ---- load ----
-data <- read_excel(
-  "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-  sheet = "CRR 2025"
-)
+file_mot <- here("Data", "[Original] 20250813 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # ---- helpers ----
+# Extract a 4-digit year (1900–2099) from a messy field (e.g., "2009", "c. 2009", "2009?").
 parse_year <- function(x) {
   stringr::str_extract(as.character(x), "(19|20)\\d{2}") %>%
     readr::parse_number()
 }
 
+# Standardise text values: NA -> "", collapse repeated whitespace, trim ends.
 clean_val <- function(x) {
   x <- as.character(x)
   x[is.na(x)] <- ""
@@ -20,9 +20,12 @@ clean_val <- function(x) {
   stringr::str_trim(x)
 }
 
-get_chr <- function(df, nm) if (nm %in% names(df)) as.character(df[[nm]]) else rep(NA_character_, nrow(df))
+# Safe column getter: returns character vector if column exists; otherwise NA_character_ vector.
+get_chr <- function(df, nm) {
+  if (nm %in% names(df)) as.character(df[[nm]]) else rep(NA_character_, nrow(df))
+}
 
-# Normalizer for partner parsing
+# (Currently unused) Normaliser for partner parsing: uppercase, remove ".", squash spaces, trim.
 norm <- function(x) {
   x <- stringr::str_to_upper(x)
   x <- stringr::str_replace_all(x, "\\.", "")
@@ -30,7 +33,7 @@ norm <- function(x) {
   stringr::str_trim(x)
 }
 
-# ---- clean "UNKNOWN" globally ----
+# ---- standardise "UNKNOWN" -> NA (across all character fields) ----
 data <- data %>%
   mutate(across(
     where(is.character),
@@ -50,6 +53,7 @@ data <- data %>%
   ) %>%
   filter(!is.na(Year_use) & Year_use >= 2000) %>%
   mutate(
+    # Decade bins used for grouping/summaries (2000s–2020s only)
     Decade = case_when(
       Year_use <= 2009 ~ "2000s",
       Year_use <= 2019 ~ "2010s",
@@ -59,32 +63,37 @@ data <- data %>%
   )
 
 # ================================
-# Permitting & Compliance (PC) 
+# Permitting & Compliance (PC)
 # ================================
-PC1_score <- rep(0L, nrow(data)) # placeholder
+# PC1 and PC4 are placeholders (not scored/assessed yet)
+PC1_score <- rep(0L, nrow(data))
 PC1_comp  <- rep(0L, nrow(data))
 
 funders    <- clean_val(get_chr(data, "Funder_specific_entity"))
 proponents <- clean_val(get_chr(data, "Proponent_specific_entity"))
 partners   <- clean_val(get_chr(data, "Partners_public"))
 
+# Combine key actor fields into one searchable text blob
 blob <- paste(funders, proponents, partners, sep = " | ")
 
-# completeness flags
+# Completeness: did they provide *any* of these actor fields?
 PC2_comp <- as.integer(funders != "" | proponents != "" | partners != "")
 PC3_comp <- PC2_comp
 
-# scores
+# Scores:
+# PC2: mentions national agencies (DA, BFAR, DENR, DA-BFAR)
 PC2_score <- ifelse(
   str_detect(blob, "(?i)\\bDA\\b|\\bBFAR\\b|\\bDENR\\b|\\bDA[- ]?BFAR\\b"),
   1L, 0L
 )
+# PC3: mentions LGU types (MLGU / PLGU / BLGU / CLGU)
 PC3_score <- ifelse(
   str_detect(blob, "(?i)\\b(?:M|P|B|C)LGU\\b"),
   1L, 0L
 )
 
-PC4_score <- rep(0L, nrow(data)) # placeholder
+# PC4 placeholder
+PC4_score <- rep(0L, nrow(data))
 PC4_comp  <- rep(0L, nrow(data))
 
 pc <- tibble(
@@ -95,17 +104,21 @@ pc <- tibble(
   PC4_score, PC4_comp
 ) %>%
   mutate(
-    Score_PC_raw     = PC1_score + PC2_score + PC3_score + PC4_score,  # 0–4
-    n_avail          = PC1_comp + PC2_comp + PC3_comp + PC4_comp,       # 0–4
-    Completeness_PC  = n_avail / 4,                                     # 0–1
-    Score_PC         = if_else(n_avail > 0, (Score_PC_raw / n_avail) * 4, 0)
+    # Raw points achieved (0–4)
+    Score_PC_raw = PC1_score + PC2_score + PC3_score + PC4_score,
+    # Number of sub-criteria that were actually assessable (0–4)
+    n_avail      = PC1_comp  + PC2_comp  + PC3_comp  + PC4_comp,
+    # Fraction of sub-criteria assessable (0–1)
+    Completeness_PC = n_avail / 4,
+    # Score scaled back to 0–4, based only on assessable sub-criteria
+    Score_PC = if_else(n_avail > 0, (Score_PC_raw / n_avail) * 4, 0)
   )
 
 pc_decade <- pc %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_PC, na.rm = TRUE),     # 0–4 RAW mean
-    completeness = mean(n_avail, na.rm = TRUE),      # **** 0–4 mean number of fields present
+    mean_score   = mean(Score_PC, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Permitting & Compliance")
@@ -125,15 +138,16 @@ pub_raw   <- clean_val(get_chr(data, "Partners_public"))
 priv_raw  <- clean_val(get_chr(data, "Partners_private"))
 roles_raw <- clean_val(get_chr(data, "roles_defined"))
 
-# completeness (1 if the field was answered at all, even "None")
-SP1_comp <- as.integer(comm_raw != "")
-SP2_comp <- as.integer(pub_raw  != "")
-SP3_comp <- as.integer(priv_raw != "")
+# Completeness: field answered at all (including explicit "None")
+SP1_comp <- as.integer(comm_raw  != "")
+SP2_comp <- as.integer(pub_raw   != "")
+SP3_comp <- as.integer(priv_raw  != "")
 SP4_comp <- as.integer(roles_raw != "")
 
-# score helpers
+# Helper: explicit "none"
 is_none <- function(x) stringr::str_detect(x, "(?i)^\\s*none\\s*$")
 
+# Scores: answered AND not "none"; roles defined = yes/true/1/defined
 SP1_score <- as.integer(SP1_comp == 1 & !is_none(comm_raw))
 SP2_score <- as.integer(SP2_comp == 1 & !is_none(pub_raw))
 SP3_score <- as.integer(SP3_comp == 1 & !is_none(priv_raw))
@@ -148,7 +162,7 @@ sp <- tibble(
 ) %>%
   mutate(
     Score_SP_raw    = SP1_score + SP2_score + SP3_score + SP4_score,  # 0–4
-    n_avail         = SP1_comp + SP2_comp + SP3_comp + SP4_comp,      # 0–4
+    n_avail         = SP1_comp  + SP2_comp  + SP3_comp  + SP4_comp,   # 0–4
     Completeness_SP = n_avail / 4,                                    # 0–1
     Score_SP        = if_else(n_avail > 0, (Score_SP_raw / n_avail) * 4, 0)
   )
@@ -156,8 +170,8 @@ sp <- tibble(
 sp_decade <- sp %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_SP, na.rm = TRUE),     # 0–4 RAW mean
-    completeness = mean(n_avail, na.rm = TRUE),      # **** 0–4
+    mean_score   = mean(Score_SP, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Stakeholder Participation")
@@ -165,6 +179,7 @@ sp_decade <- sp %>%
 # ================================
 # Socioeconomic & Climate Links (SC)
 # ================================
+# NOTE: get_chr already exists above; this guard is redundant but kept as-is.
 if (!exists("get_chr")) {
   get_chr <- function(df, col) if (col %in% names(df)) df[[col]] else NA_character_
 }
@@ -172,15 +187,21 @@ if (!exists("get_chr")) {
 stated_obj        <- clean_val(get_chr(data, "Stated_objective"))
 socioecon_benefit <- clean_val(get_chr(data, "Socioecon_benefits"))
 
+# SC1: socio-economic benefits field provided
 SC1_comp  <- as.integer(socioecon_benefit != "")
 SC1_score <- ifelse(SC1_comp == 1, 1L, 0L)
 
+# SC2–SC4 use stated objective text
 SC2_comp  <- as.integer(stated_obj != "")
 SC2_score <- ifelse(str_detect(stated_obj, regex("\\bclimate\\b", ignore_case = TRUE)), 1L, 0L)
 
 SC3_comp  <- as.integer(stated_obj != "")
 SC3_score <- ifelse(
-  str_detect(stated_obj, regex("\\b(fisheries?|food|livelihood|fishing|production|catch|fish stock|fishery|productivity|fish populations|fish population)\\b", ignore_case = TRUE)),
+  str_detect(
+    stated_obj,
+    regex("\\b(fisheries?|food|livelihood|fishing|production|catch|fish stock|fishery|productivity|fish populations|fish population)\\b",
+          ignore_case = TRUE)
+  ),
   1L, 0L
 )
 
@@ -196,7 +217,7 @@ sc <- tibble(
 ) %>%
   mutate(
     Score_SC_raw    = SC1_score + SC2_score + SC3_score + SC4_score,  # 0–4
-    n_avail         = SC1_comp + SC2_comp + SC3_comp + SC4_comp,      # 0–4
+    n_avail         = SC1_comp  + SC2_comp  + SC3_comp  + SC4_comp,   # 0–4
     Completeness_SC = n_avail / 4,                                    # 0–1
     Score_SC        = if_else(n_avail > 0, (Score_SC_raw / n_avail) * 4, 0)
   )
@@ -204,8 +225,8 @@ sc <- tibble(
 sc_decade <- sc %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_SC, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # **** 0–4
+    mean_score   = mean(Score_SC, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Socioeconomic & Climate Links")
@@ -220,12 +241,15 @@ source_type        <- clean_val(get_chr(data, "Source_type"))
 reference_text     <- clean_val(get_chr(data, "Reference"))
 eco_indicators     <- clean_val(get_chr(data, "Ecological_indicators"))
 
+# ME1: monitoring results field provided
 ME1_comp  <- as.integer(monitoring_results != "")
 ME1_score <- ifelse(ME1_comp == 1, 1L, 0L)
 
+# ME2: duration known AND >= 5 years
 ME2_comp  <- as.integer(!is.na(project_start) & !is.na(project_end))
 ME2_score <- ifelse(ME2_comp == 1 & (project_end - project_start >= 5), 1L, 0L)
 
+# ME3: any reference/source info AND indicates reporting/publication
 ME3_comp  <- as.integer(source_type != "" | reference_text != "")
 ME3_score <- ifelse(
   str_detect(source_type, regex("Journal Article", ignore_case = TRUE)) |
@@ -233,6 +257,7 @@ ME3_score <- ifelse(
   1L, 0L
 )
 
+# ME4: ecological indicators field provided
 ME4_comp  <- as.integer(eco_indicators != "")
 ME4_score <- ifelse(ME4_comp == 1, 1L, 0L)
 
@@ -245,7 +270,7 @@ me <- tibble(
 ) %>%
   mutate(
     Score_ME_raw    = ME1_score + ME2_score + ME3_score + ME4_score,  # 0–4
-    n_avail         = ME1_comp + ME2_comp + ME3_comp + ME4_comp,      # 0–4
+    n_avail         = ME1_comp  + ME2_comp  + ME3_comp  + ME4_comp,   # 0–4
     Completeness_ME = n_avail / 4,                                    # 0–1
     Score_ME        = if_else(n_avail > 0, (Score_ME_raw / n_avail) * 4, 0)
   )
@@ -253,8 +278,8 @@ me <- tibble(
 me_decade <- me %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_ME, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # **** 0–4
+    mean_score   = mean(Score_ME, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Monitoring & Evaluation")
@@ -262,18 +287,19 @@ me_decade <- me %>%
 # ================================
 # Project Objectives & Outcomes (PO)
 # ================================
-research_results  <- clean_val(get_chr(data, "Research_results"))
-evaluated_obj     <- clean_val(get_chr(data, "Evaluated_objective"))
-stated_obj        <- clean_val(get_chr(data, "Stated_objective"))
-reference_text    <- clean_val(get_chr(data, "Reference"))
-monitoring_text   <- clean_val(get_chr(data, "Monitoring_results"))
+research_results <- clean_val(get_chr(data, "Research_results"))
+evaluated_obj    <- clean_val(get_chr(data, "Evaluated_objective"))
+stated_obj       <- clean_val(get_chr(data, "Stated_objective"))
+monitoring_text  <- clean_val(get_chr(data, "Monitoring_results"))
 
 total_area  <- suppressWarnings(readr::parse_number(get_chr(data, "Total_area")))
 total_units <- suppressWarnings(readr::parse_number(get_chr(data, "Total_units")))
 
+# PO1: research results field provided
 PO1_comp  <- as.integer(research_results != "")
 PO1_score <- ifelse(PO1_comp == 1, 1L, 0L)
 
+# PO2: evaluated objective field present AND evidence of evaluation/results/metrics
 eval_regex <- regex(
   "(achiev|met|not met|part(ly)? met|success|effective|ineffective|increase|decrease|impact|evaluation|assessment)",
   ignore_case = TRUE
@@ -284,18 +310,23 @@ PO2_score <- ifelse(
   PO2_comp == 1 &
     (
       str_detect(research_results, eval_regex) |
-        str_detect(monitoring_text, eval_regex)  |
-        (!is.na(total_area)  | !is.na(total_units))
+        str_detect(monitoring_text, eval_regex) |
+        (!is.na(total_area) | !is.na(total_units))
     ),
   1L, 0L
 )
 
+# PO3: stated objective is non-trivial (more than 5 words)
 PO3_comp  <- as.integer(stated_obj != "")
 PO3_score <- ifelse(PO3_comp == 1 & stringr::str_count(stated_obj, "\\S+") > 5, 1L, 0L)
 
+# PO4: any scale metric present (area or units) and > 1
 PO4_comp  <- as.integer(!is.na(total_area) | !is.na(total_units))
-PO4_score <- ifelse((!is.na(total_area)  & total_area  > 1) |
-                      (!is.na(total_units) & total_units > 1), 1L, 0L)
+PO4_score <- ifelse(
+  (!is.na(total_area)  & total_area  > 1) |
+    (!is.na(total_units) & total_units > 1),
+  1L, 0L
+)
 
 po <- tibble(
   ID = data$ID, Decade = data$Decade,
@@ -306,36 +337,42 @@ po <- tibble(
 ) %>%
   mutate(
     Score_PO_raw    = PO1_score + PO2_score + PO3_score + PO4_score,  # 0–4
-    n_avail         = PO1_comp + PO2_comp + PO3_comp + PO4_comp,      # 0–4
+    n_avail         = PO1_comp  + PO2_comp  + PO3_comp  + PO4_comp,   # 0–4
     Completeness_PO = n_avail / 4,                                    # 0–1
     Score_PO        = if_else(n_avail > 0, (Score_PO_raw / n_avail) * 4, 0)
   )
 
 po_decade <- po %>%
-  dplyr::group_by(Decade) %>%
-  dplyr::summarise(
-    mean_score   = mean(Score_PO, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # **** 0–4
+  group_by(Decade) %>%
+  summarise(
+    mean_score   = mean(Score_PO, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
-  dplyr::mutate(MEL_Domain = "Project Objectives & Outcomes")
+  mutate(MEL_Domain = "Project Objectives & Outcomes")
 
 # ================================
 # Build split-cell polygons (PC + SP + SC + ME + PO)
 # ================================
-dec_levels  <- c("2000s","2010s","2020s")
+# Decades included in the plot (only those present in the summaries)
+dec_levels  <- c("2000s", "2010s", "2020s")
 dec_present <- dec_levels[dec_levels %in% unique(c(
   pc_decade$Decade, sp_decade$Decade, sc_decade$Decade, me_decade$Decade, po_decade$Decade
 ))]
 
-mk_tri <- function(row, which = c("top","bottom"), col = 1L) {
+# Create triangle coordinates for one cell:
+# - bottom triangle shows completeness (0–4)
+# - top triangle shows mean score (0–4)
+mk_tri <- function(row, which = c("top", "bottom"), col = 1L) {
   which <- match.arg(which)
   x0 <- col - 0.5; x1 <- col + 0.5
   y0 <- row - 0.5; y1 <- row + 0.5
+  
   if (which == "bottom") tibble(x = c(x0, x1, x1), y = c(y0, y0, y1))
   else                   tibble(x = c(x0, x0, x1), y = c(y0, y1, y1))
 }
 
+# Attach triangles to each (domain, decade) entry for plotting
 build_poly <- function(df_decade, col_id, label, dec_order) {
   df_decade %>%
     mutate(Decade = factor(Decade, levels = dec_order)) %>%
@@ -353,16 +390,16 @@ build_poly <- function(df_decade, col_id, label, dec_order) {
     ungroup()
 }
 
-pc_poly <- build_poly(pc_decade, 1L, "Permitting & Compliance",           dec_present)
-sp_poly <- build_poly(sp_decade, 2L, "Stakeholder Participation",         dec_present)
-sc_poly <- build_poly(sc_decade, 3L, "Socioeconomic & Climate Links",     dec_present)
-me_poly <- build_poly(me_decade, 4L, "Monitoring & Evaluation",           dec_present)
-po_poly <- build_poly(po_decade, 5L, "Project Objectives & Outcomes",     dec_present)
+pc_poly <- build_poly(pc_decade, 1L, "Permitting & Compliance",       dec_present)
+sp_poly <- build_poly(sp_decade, 2L, "Stakeholder Participation",     dec_present)
+sc_poly <- build_poly(sc_decade, 3L, "Socioeconomic & Climate Links", dec_present)
+me_poly <- build_poly(me_decade, 4L, "Monitoring & Evaluation",       dec_present)
+po_poly <- build_poly(po_decade, 5L, "Project Objectives & Outcomes", dec_present)
 
 poly_all <- bind_rows(pc_poly, sp_poly, sc_poly, me_poly, po_poly)
 
 # ================================
-# Plot — grayscale completeness (0–4), black text; top = mean score (0–4)
+# Plot: bottom = mean completeness (0–4); top = mean score (0–4)
 # ================================
 pillar_labs <- c(
   "Permitting\n& Compliance",
@@ -373,19 +410,20 @@ pillar_labs <- c(
 )
 
 p <- ggplot() +
-  # --- Bottom triangles: Mean number of fields present (0–4)
+  # Bottom triangles: mean # assessable fields (0–4)
   geom_polygon(
     data = poly_all %>%
-      select(MEL_Domain, Decade, completeness, poly_bottom) %>% unnest(poly_bottom),
+      select(MEL_Domain, Decade, completeness, poly_bottom) %>%
+      unnest(poly_bottom),
     aes(x, y, group = interaction(MEL_Domain, Decade), fill = completeness),
     color = "grey15", linewidth = 0.5
   ) +
   scale_fill_gradient(
-    name   = "Completeness",
+    name   = "Mean completeness (0–4)",
     limits = c(0, 4),
-    low    = "#f2f2f2",   # lower completeness = lighter
-    high   = "#5F5F5C",   # higher completeness = darker
-    guide = guide_colorbar(
+    low    = "#f2f2f2",  # lower completeness = lighter
+    high   = "#5F5F5C",  # higher completeness = darker
+    guide  = guide_colorbar(
       title.position = "top",
       barheight = unit(110, "pt"),
       barwidth  = unit(10,  "pt"),
@@ -394,21 +432,22 @@ p <- ggplot() +
     )
   ) +
   ggnewscale::new_scale_fill() +
-  # --- Top triangles: Mean Raw Score (0–4) — YlOrRd (low=yellow, high=red)
+  # Top triangles: mean score (0–4)
   geom_polygon(
     data = poly_all %>%
-      select(MEL_Domain, Decade, mean_score, poly_top) %>% unnest(poly_top),
+      select(MEL_Domain, Decade, mean_score, poly_top) %>%
+      unnest(poly_top),
     aes(x, y, group = interaction(MEL_Domain, Decade), fill = mean_score),
     color = "grey15", linewidth = 0.5
   ) +
   scale_fill_distiller(
-    name      = "Rescaled score",
+    name      = "Mean score (0–4)",
     palette   = "YlOrRd",
     direction = -1,
     limits    = c(0, 4),
     breaks    = 0:4,
     oob       = scales::squish,
-    guide = guide_colorbar(
+    guide     = guide_colorbar(
       title.position = "top",
       barheight = unit(110, "pt"),
       barwidth  = unit(10,  "pt"),
@@ -416,20 +455,18 @@ p <- ggplot() +
       frame.colour = NA
     )
   ) +
-  # --- In-cell labels (all black text)
-  # top-left number: mean score (0–4)
+  # In-cell labels: top-left = mean score; bottom-right = mean completeness
   geom_text(
     data = poly_all,
     aes(x = col_id - 0.18, y = row + 0.18, label = sprintf("%.1f", mean_score)),
     size = 5.2, color = "black"
   ) +
-  # bottom-right number: mean number of fields present (0–4)
   geom_text(
     data = poly_all,
     aes(x = col_id + 0.18, y = row - 0.18, label = sprintf("%.1f", completeness)),
     size = 4.8, color = "black"
   ) +
-  # --- Axes & theme
+  # Axes & theme
   scale_x_continuous(breaks = 1:5, labels = pillar_labs, expand = expansion(mult = 0.015)) +
   scale_y_continuous(breaks = seq_along(dec_present), labels = dec_present, expand = expansion(add = 0.15)) +
   coord_fixed(clip = "off") +
@@ -452,37 +489,16 @@ p <- ggplot() +
 print(p)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ################################################
-#
-#
-# < 2000s
-#
-#
+# < 2000s (1970s–1990s)
 ################################################
-
 
 # ---- packages ----
 pacman::p_load(tidyverse, readxl, stringr, ggnewscale, grid)
 
 # ---- load ----
-data <- read_excel(
-  "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-  sheet = "CRR 2025"
-)
+file_mot <- here("Data", "[Original] 20250813 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # ---- helpers ----
 parse_year <- function(x) {
@@ -499,7 +515,6 @@ clean_val <- function(x) {
 
 get_chr <- function(df, nm) if (nm %in% names(df)) as.character(df[[nm]]) else rep(NA_character_, nrow(df))
 
-# Normalizer for partner parsing
 norm <- function(x) {
   x <- stringr::str_to_upper(x)
   x <- stringr::str_replace_all(x, "\\.", "")
@@ -507,7 +522,7 @@ norm <- function(x) {
   stringr::str_trim(x)
 }
 
-# ---- clean "UNKNOWN" globally ----
+# ---- standardise "UNKNOWN" -> NA ----
 data <- data %>%
   mutate(across(
     where(is.character),
@@ -518,30 +533,28 @@ data <- data %>%
     }
   ))
 
-# ---- build Year_use and decade bins (1970s–2020s) ----
+# ---- derive Year_use and decade bins (1970s–1990s) ----
 data <- data %>%
   mutate(
     Year_estab_num    = parse_year(Year_estab),
     Project_start_num = parse_year(Project_start),
     Year_use          = dplyr::coalesce(Year_estab_num, Project_start_num)
   ) %>%
-  filter(!is.na(Year_use) & Year_use >= 1970) %>%   # <- include older decades
+  filter(!is.na(Year_use) & Year_use >= 1970) %>%   # include older decades
   mutate(
     Decade = case_when(
       Year_use <= 1979 ~ "1970s",
       Year_use <= 1989 ~ "1980s",
       Year_use <= 1999 ~ "1990s"
-  #    Year_use <= 2009 ~ "2000s",
-  #    Year_use <= 2019 ~ "2010s",
-  #    TRUE             ~ "2020s"
+      # (2000s+ intentionally omitted here)
     ),
     .after = Year_use
   )
 
 # ================================
-# Permitting & Compliance (PC) 
+# Permitting & Compliance (PC)
 # ================================
-PC1_score <- rep(0L, nrow(data)) # placeholder
+PC1_score <- rep(0L, nrow(data))
 PC1_comp  <- rep(0L, nrow(data))
 
 funders    <- clean_val(get_chr(data, "Funder_specific_entity"))
@@ -550,11 +563,9 @@ partners   <- clean_val(get_chr(data, "Partners_public"))
 
 blob <- paste(funders, proponents, partners, sep = " | ")
 
-# completeness flags
 PC2_comp <- as.integer(funders != "" | proponents != "" | partners != "")
 PC3_comp <- PC2_comp
 
-# scores
 PC2_score <- ifelse(
   str_detect(blob, "(?i)\\bDA\\b|\\bBFAR\\b|\\bDENR\\b|\\bDA[- ]?BFAR\\b"),
   1L, 0L
@@ -564,7 +575,7 @@ PC3_score <- ifelse(
   1L, 0L
 )
 
-PC4_score <- rep(0L, nrow(data)) # placeholder
+PC4_score <- rep(0L, nrow(data))
 PC4_comp  <- rep(0L, nrow(data))
 
 pc <- tibble(
@@ -575,17 +586,17 @@ pc <- tibble(
   PC4_score, PC4_comp
 ) %>%
   mutate(
-    Score_PC_raw     = PC1_score + PC2_score + PC3_score + PC4_score,  # 0–4
-    n_avail          = PC1_comp + PC2_comp + PC3_comp + PC4_comp,       # 0–4
-    Completeness_PC  = n_avail / 4,                                     # 0–1
-    Score_PC         = if_else(n_avail > 0, (Score_PC_raw / n_avail) * 4, 0)
+    Score_PC_raw    = PC1_score + PC2_score + PC3_score + PC4_score,  # 0–4
+    n_avail         = PC1_comp  + PC2_comp  + PC3_comp  + PC4_comp,   # 0–4
+    Completeness_PC = n_avail / 4,                                    # 0–1
+    Score_PC        = if_else(n_avail > 0, (Score_PC_raw / n_avail) * 4, 0)
   )
 
 pc_decade <- pc %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_PC, na.rm = TRUE),     # 0–4 RAW mean
-    completeness = mean(n_avail, na.rm = TRUE),      # 0–4 mean number of fields present
+    mean_score   = mean(Score_PC, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Permitting & Compliance")
@@ -605,13 +616,11 @@ pub_raw   <- clean_val(get_chr(data, "Partners_public"))
 priv_raw  <- clean_val(get_chr(data, "Partners_private"))
 roles_raw <- clean_val(get_chr(data, "roles_defined"))
 
-# completeness (1 if the field was answered at all, even "None")
-SP1_comp <- as.integer(comm_raw != "")
-SP2_comp <- as.integer(pub_raw  != "")
-SP3_comp <- as.integer(priv_raw != "")
+SP1_comp <- as.integer(comm_raw  != "")
+SP2_comp <- as.integer(pub_raw   != "")
+SP3_comp <- as.integer(priv_raw  != "")
 SP4_comp <- as.integer(roles_raw != "")
 
-# score helpers
 is_none <- function(x) stringr::str_detect(x, "(?i)^\\s*none\\s*$")
 
 SP1_score <- as.integer(SP1_comp == 1 & !is_none(comm_raw))
@@ -628,7 +637,7 @@ sp <- tibble(
 ) %>%
   mutate(
     Score_SP_raw    = SP1_score + SP2_score + SP3_score + SP4_score,  # 0–4
-    n_avail         = SP1_comp + SP2_comp + SP3_comp + SP4_comp,      # 0–4
+    n_avail         = SP1_comp  + SP2_comp  + SP3_comp  + SP4_comp,   # 0–4
     Completeness_SP = n_avail / 4,                                    # 0–1
     Score_SP        = if_else(n_avail > 0, (Score_SP_raw / n_avail) * 4, 0)
   )
@@ -636,8 +645,8 @@ sp <- tibble(
 sp_decade <- sp %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_SP, na.rm = TRUE),     # 0–4 RAW mean
-    completeness = mean(n_avail, na.rm = TRUE),      # 0–4
+    mean_score   = mean(Score_SP, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Stakeholder Participation")
@@ -660,7 +669,11 @@ SC2_score <- ifelse(str_detect(stated_obj, regex("\\bclimate\\b", ignore_case = 
 
 SC3_comp  <- as.integer(stated_obj != "")
 SC3_score <- ifelse(
-  str_detect(stated_obj, regex("\\b(fisheries?|food|livelihood|fishing|production|catch|fish stock|fishery|productivity|fish populations|fish population)\\b", ignore_case = TRUE)),
+  str_detect(
+    stated_obj,
+    regex("\\b(fisheries?|food|livelihood|fishing|production|catch|fish stock|fishery|productivity|fish populations|fish population)\\b",
+          ignore_case = TRUE)
+  ),
   1L, 0L
 )
 
@@ -676,7 +689,7 @@ sc <- tibble(
 ) %>%
   mutate(
     Score_SC_raw    = SC1_score + SC2_score + SC3_score + SC4_score,  # 0–4
-    n_avail         = SC1_comp + SC2_comp + SC3_comp + SC4_comp,      # 0–4
+    n_avail         = SC1_comp  + SC2_comp  + SC3_comp  + SC4_comp,   # 0–4
     Completeness_SC = n_avail / 4,                                    # 0–1
     Score_SC        = if_else(n_avail > 0, (Score_SC_raw / n_avail) * 4, 0)
   )
@@ -684,8 +697,8 @@ sc <- tibble(
 sc_decade <- sc %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_SC, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # 0–4
+    mean_score   = mean(Score_SC, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Socioeconomic & Climate Links")
@@ -725,7 +738,7 @@ me <- tibble(
 ) %>%
   mutate(
     Score_ME_raw    = ME1_score + ME2_score + ME3_score + ME4_score,  # 0–4
-    n_avail         = ME1_comp + ME2_comp + ME3_comp + ME4_comp,      # 0–4
+    n_avail         = ME1_comp  + ME2_comp  + ME3_comp  + ME4_comp,   # 0–4
     Completeness_ME = n_avail / 4,                                    # 0–1
     Score_ME        = if_else(n_avail > 0, (Score_ME_raw / n_avail) * 4, 0)
   )
@@ -733,8 +746,8 @@ me <- tibble(
 me_decade <- me %>%
   group_by(Decade) %>%
   summarise(
-    mean_score   = mean(Score_ME, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # 0–4
+    mean_score   = mean(Score_ME, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
   mutate(MEL_Domain = "Monitoring & Evaluation")
@@ -742,11 +755,11 @@ me_decade <- me %>%
 # ================================
 # Project Objectives & Outcomes (PO)
 # ================================
-research_results  <- clean_val(get_chr(data, "Research_results"))
-evaluated_obj     <- clean_val(get_chr(data, "Evaluated_objective"))
-stated_obj        <- clean_val(get_chr(data, "Stated_objective"))
-reference_text    <- clean_val(get_chr(data, "Reference"))
-monitoring_text   <- clean_val(get_chr(data, "Monitoring_results"))
+research_results <- clean_val(get_chr(data, "Research_results"))
+evaluated_obj    <- clean_val(get_chr(data, "Evaluated_objective"))
+stated_obj       <- clean_val(get_chr(data, "Stated_objective"))
+reference_text   <- clean_val(get_chr(data, "Reference"))
+monitoring_text  <- clean_val(get_chr(data, "Monitoring_results"))
 
 total_area  <- suppressWarnings(readr::parse_number(get_chr(data, "Total_area")))
 total_units <- suppressWarnings(readr::parse_number(get_chr(data, "Total_units")))
@@ -764,8 +777,8 @@ PO2_score <- ifelse(
   PO2_comp == 1 &
     (
       str_detect(research_results, eval_regex) |
-        str_detect(monitoring_text, eval_regex)  |
-        (!is.na(total_area)  | !is.na(total_units))
+        str_detect(monitoring_text, eval_regex) |
+        (!is.na(total_area) | !is.na(total_units))
     ),
   1L, 0L
 )
@@ -774,8 +787,11 @@ PO3_comp  <- as.integer(stated_obj != "")
 PO3_score <- ifelse(PO3_comp == 1 & stringr::str_count(stated_obj, "\\S+") > 5, 1L, 0L)
 
 PO4_comp  <- as.integer(!is.na(total_area) | !is.na(total_units))
-PO4_score <- ifelse((!is.na(total_area)  & total_area  > 1) |
-                      (!is.na(total_units) & total_units > 1), 1L, 0L)
+PO4_score <- ifelse(
+  (!is.na(total_area)  & total_area  > 1) |
+    (!is.na(total_units) & total_units > 1),
+  1L, 0L
+)
 
 po <- tibble(
   ID = data$ID, Decade = data$Decade,
@@ -786,19 +802,19 @@ po <- tibble(
 ) %>%
   mutate(
     Score_PO_raw    = PO1_score + PO2_score + PO3_score + PO4_score,  # 0–4
-    n_avail         = PO1_comp + PO2_comp + PO3_comp + PO4_comp,      # 0–4
+    n_avail         = PO1_comp  + PO2_comp  + PO3_comp  + PO4_comp,   # 0–4
     Completeness_PO = n_avail / 4,                                    # 0–1
     Score_PO        = if_else(n_avail > 0, (Score_PO_raw / n_avail) * 4, 0)
   )
 
 po_decade <- po %>%
-  dplyr::group_by(Decade) %>%
-  dplyr::summarise(
-    mean_score   = mean(Score_PO, na.rm = TRUE),     # 0–4 mean
-    completeness = mean(n_avail, na.rm = TRUE),      # 0–4
+  group_by(Decade) %>%
+  summarise(
+    mean_score   = mean(Score_PO, na.rm = TRUE),  # mean score (0–4)
+    completeness = mean(n_avail,  na.rm = TRUE),  # mean # assessable fields (0–4)
     .groups = "drop"
   ) %>%
-  dplyr::mutate(MEL_Domain = "Project Objectives & Outcomes")
+  mutate(MEL_Domain = "Project Objectives & Outcomes")
 
 # ================================
 # Build split-cell polygons (PC + SP + SC + ME + PO)
@@ -833,16 +849,16 @@ build_poly <- function(df_decade, col_id, label, dec_order) {
     ungroup()
 }
 
-pc_poly <- build_poly(pc_decade, 1L, "Permitting & Compliance",           dec_present)
-sp_poly <- build_poly(sp_decade, 2L, "Stakeholder Participation",         dec_present)
-sc_poly <- build_poly(sc_decade, 3L, "Socioeconomic & Climate Links",     dec_present)
-me_poly <- build_poly(me_decade, 4L, "Monitoring & Evaluation",           dec_present)
-po_poly <- build_poly(po_decade, 5L, "Project Objectives & Outcomes",     dec_present)
+pc_poly <- build_poly(pc_decade, 1L, "Permitting & Compliance",       dec_present)
+sp_poly <- build_poly(sp_decade, 2L, "Stakeholder Participation",     dec_present)
+sc_poly <- build_poly(sc_decade, 3L, "Socioeconomic & Climate Links", dec_present)
+me_poly <- build_poly(me_decade, 4L, "Monitoring & Evaluation",       dec_present)
+po_poly <- build_poly(po_decade, 5L, "Project Objectives & Outcomes", dec_present)
 
 poly_all <- bind_rows(pc_poly, sp_poly, sc_poly, me_poly, po_poly)
 
 # ================================
-# Plot — grayscale completeness (0–4), black text; top = mean score (0–4)
+# Plot: bottom = mean completeness (0–4); top = mean score (0–4)
 # ================================
 pillar_labs <- c(
   "Permitting\n& Compliance",
@@ -853,10 +869,11 @@ pillar_labs <- c(
 )
 
 p <- ggplot() +
-  # --- Bottom triangles: Mean number of fields present (0–4)
+  # Bottom triangles: mean # assessable fields (0–4)
   geom_polygon(
     data = poly_all %>%
-      select(MEL_Domain, Decade, completeness, poly_bottom) %>% unnest(poly_bottom),
+      select(MEL_Domain, Decade, completeness, poly_bottom) %>%
+      unnest(poly_bottom),
     aes(x, y, group = interaction(MEL_Domain, Decade), fill = completeness),
     color = "grey15", linewidth = 0.5
   ) +
@@ -865,7 +882,7 @@ p <- ggplot() +
     limits = c(0, 4),
     low    = "#f2f2f2",
     high   = "#5F5F5C",
-    guide = guide_colorbar(
+    guide  = guide_colorbar(
       title.position = "top",
       barheight = unit(110, "pt"),
       barwidth  = unit(10,  "pt"),
@@ -874,10 +891,11 @@ p <- ggplot() +
     )
   ) +
   ggnewscale::new_scale_fill() +
-  # --- Top triangles: Mean Raw Score (0–4) — YlOrRd (low=yellow, high=red)
+  # Top triangles: mean score (0–4)
   geom_polygon(
     data = poly_all %>%
-      select(MEL_Domain, Decade, mean_score, poly_top) %>% unnest(poly_top),
+      select(MEL_Domain, Decade, mean_score, poly_top) %>%
+      unnest(poly_top),
     aes(x, y, group = interaction(MEL_Domain, Decade), fill = mean_score),
     color = "grey15", linewidth = 0.5
   ) +
@@ -888,7 +906,7 @@ p <- ggplot() +
     limits    = c(0, 4),
     breaks    = 0:4,
     oob       = scales::squish,
-    guide = guide_colorbar(
+    guide     = guide_colorbar(
       title.position = "top",
       barheight = unit(110, "pt"),
       barwidth  = unit(10,  "pt"),
@@ -896,7 +914,7 @@ p <- ggplot() +
       frame.colour = NA
     )
   ) +
-  # --- In-cell labels (all black text)
+  # In-cell labels: top-left = mean score; bottom-right = mean completeness
   geom_text(
     data = poly_all,
     aes(x = col_id - 0.18, y = row + 0.18, label = sprintf("%.1f", mean_score)),
@@ -907,7 +925,6 @@ p <- ggplot() +
     aes(x = col_id + 0.18, y = row - 0.18, label = sprintf("%.1f", completeness)),
     size = 4.8, color = "black"
   ) +
-  # --- Axes & theme
   scale_x_continuous(breaks = 1:5, labels = pillar_labs, expand = expansion(mult = 0.015)) +
   scale_y_continuous(breaks = seq_along(dec_present), labels = dec_present, expand = expansion(add = 0.15)) +
   coord_fixed(clip = "off") +
@@ -928,4 +945,3 @@ p <- ggplot() +
   )
 
 print(p)
-

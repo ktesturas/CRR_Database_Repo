@@ -1,6 +1,10 @@
 pacman::p_load(tidyverse, readxl, here)
-data <- read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-                   sheet = "CRR 2025")
+file_mot <- here("Data", "[Original] 20250813 CRR Governance Database 2023-2025.xlsx")
+
+data <- read_excel(
+  path  = file_mot,
+  sheet = "CRR 2025"
+)
 
 
 

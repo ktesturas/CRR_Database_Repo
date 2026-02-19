@@ -3,8 +3,8 @@
 
 # Load Prerequisites
 pacman::p_load(tidyverse, readxl, here)
-data <- readxl::read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250422 CRR Governance Database 2023-2025.xlsx",
-                           sheet = "CRR 2025")
+file_mot <- here("Data", "20250422 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 library(dplyr)
 library(tidyr)
@@ -295,9 +295,12 @@ data_cleaned <- data %>%
 
 # 2. Separate known and unknown year entries
 data_known <- data_cleaned %>%
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.numeric(Year_estab),
-         Year_estab = as.character(Year_estab))  # Convert to character for plotting
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(Year_estab = as.character(Year_estab_num))
+
 
 data_unknown <- data_cleaned %>%
   filter(is.na(Year_estab)) %>%
@@ -372,9 +375,12 @@ data_cleaned <- data %>%
 
 # 2. Separate known and unknown years
 data_known <- data_cleaned %>%
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.numeric(Year_estab),
-         Year_estab = as.character(Year_estab))
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(Year_estab = as.character(Year_estab_num))
+
 
 data_unknown <- data_cleaned %>%
   filter(is.na(Year_estab)) %>%
@@ -466,8 +472,11 @@ data_cleaned <- data %>%
 
 # 2. Filter only rows with known years
 data_known <- data_cleaned %>%
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.numeric(Year_estab))
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(Year_estab = as.character(Year_estab_num))
 
 # 3. Create 'Decade' or 'Era' variable
 data_known <- data_known %>%
@@ -523,8 +532,8 @@ ggplot(pie_data_clean, aes(x = "", y = prop, fill = Specific_method)) +
 #########################################################
 # Plot of % Records that use a particular type of restoration technology
 
-data <- readxl::read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-                           sheet = "CRR 2025")
+file_mot <- here("Data", "20250609 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 
 library(tidyverse)
@@ -547,8 +556,14 @@ data_material <- data_material %>%
 
 # 3. Filter valid years and convert to character for plotting
 data_material <- data_material %>%
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.character(as.numeric(Year_estab)))
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(
+    Year_estab = as.character(Year_estab_num)
+  ) %>%
+  select(-Year_estab_num)
 
 # 4. Count per year-material combination and calculate proportion
 plot_data <- data_material %>%
@@ -592,9 +607,15 @@ ggplot(plot_data, aes(x = Year_estab, y = prop, fill = AR_material_type)) +
 
 # 1. Filter only Artificial Reef projects (including mixed methods)
 data_reef <- data %>%
-  filter(str_detect(Specific_method, "(?i)Artificial reef")) %>%  # (?i) makes it case-insensitive
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.numeric(Year_estab))
+  filter(str_detect(Specific_method, regex("Artificial reef", ignore_case = TRUE))) %>%
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(
+    Year_estab = Year_estab_num
+  ) %>%
+  select(-Year_estab_num)
 
 
 # 2. Assign Era
@@ -667,8 +688,13 @@ data_ar <- data %>%
 
 # 2. Filter valid years and convert to numeric
 data_ar <- data_ar %>%
-  filter(!is.na(Year_estab)) %>%
-  mutate(Year_estab = as.numeric(Year_estab))
+  mutate(
+    Year_estab_num = readr::parse_number(as.character(Year_estab), na = c("", "Unknown", "UNKNOWN"))
+  ) %>%
+  filter(!is.na(Year_estab_num)) %>%
+  mutate(Year_estab = Year_estab_num) %>%
+  select(-Year_estab_num)
+
 
 # 3. Assign Era based on Year_estab
 data_ar <- data_ar %>%
@@ -728,8 +754,8 @@ ggplot(pie_data, aes(x = "", y = prop, fill = AR_material_type)) +
 ### PROJECT DURATION
 library(tidyverse)
 
-data <- readxl::read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250616 CRR Governance Database 2023-2025.xlsx",
-                           sheet = "CRR 2025")
+file_mot <- here("Data", "20250616 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # Step 1: Prepare your data
 df <- data %>%
@@ -843,9 +869,8 @@ ggsave("Output/Project_Durations.png", width = 10, height = 8.5, dpi = 720)
 # Load packages
 pacman::p_load(readxl, dplyr, ggplot2, forcats)
 
-# Read the Excel file
-data <- read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-                   sheet = "CRR 2025")
+file_mot <- here("Data", "20250609 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # Count exact Source_type values
 source_summary <- data %>%
@@ -993,8 +1018,9 @@ plot_references
 pacman::p_load(readxl, dplyr, ggplot2, forcats, tidyr, RColorBrewer)
 
 # === 1. Read data ===
-data <- read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-                   sheet = "CRR 2025")
+file_mot <- here("Data", "20250609 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
+
 
 # === 2. Get unique Specific_methods and extend color palette ===
 method_levels <- unique(data$Specific_method)
@@ -1038,7 +1064,7 @@ fund_plot <- data %>%
     fill = "Restoration Method",
     title = "Restoration Methods by Funder Sector"
   ) +
-  theme_minimal(base_size = 13) +http://127.0.0.1:17671/graphics/plot_zoom_png?width=1672&height=756
+  theme_minimal(base_size = 13) +
   theme(
     axis.text.y = element_text(face = "bold"),
     legend.position = "bottom",
@@ -1061,8 +1087,8 @@ library(networkD3)
 library(htmlwidgets)
 
 # === 1. Load data ===
-data <- read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-                   sheet = "CRR 2025")
+file_mot <- here("Data", "20250609 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # === 2. Split multiple values ===
 sankey_data <- data %>%
@@ -1181,8 +1207,8 @@ library(tidyverse)
 library(readxl)
 
 # Load the data
-data <- read_excel("C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250616 CRR Governance Database 2023-2025.xlsx",
-                   sheet = "CRR 2025")
+file_mot <- here("Data", "20250616 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 # Calculate the percentage of well-defined timelines
 well_defined_timeline <- data %>%

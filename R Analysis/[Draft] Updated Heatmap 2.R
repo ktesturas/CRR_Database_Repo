@@ -2,10 +2,9 @@
 pacman::p_load(tidyverse, readxl, stringr, ggnewscale)
 
 # ---- load ----
-data <- read_excel(
-  "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250609 CRR Governance Database 2023-2025.xlsx",
-  sheet = "CRR 2025"
-)
+file_mot <- here("Data", "20250609 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
+
 
 # ---- helpers ----
 parse_year <- function(x) {

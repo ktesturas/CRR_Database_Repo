@@ -3,8 +3,8 @@
 
 # Load Prerequisites
 pacman::p_load(tidyverse, readxl, here)
-data <- readxl::read_excel("C:/Users/Lenovo/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250422 CRR Governance Database 2023-2025.xlsx",
-                           sheet = "CRR 2025")
+file_mot <- here("Data", "20250422 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
 
 #########################################################################################################
 # What are the database updates?
@@ -52,13 +52,19 @@ combined <- bind_rows(data, data2)
 
 # Prepare Data 
 combined_data <- combined %>%
-  mutate(visual_status = case_when(
-    Status == "Published" & Change_type == "Deleted" ~ "Pub in 23 but Del in 2025",
-    Status == "Published" ~ "Pub in 2023 and Inc in 2025",
-    Status == "Unpublished" & Change_type == "Modified" ~ "Unpub in 2023 but Inc in 2025",
-    Status == "Unpublished" & Change_type == "Deleted" ~ "Unpub in 2023 and Del in 2025"
-  ))  %>%
-  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  mutate(
+    visual_status = case_when(
+      Status == "Published"   & Change_type == "Deleted"  ~ "Pub in 23 but Del in 2025",
+      Status == "Published"                                ~ "Pub in 2023 and Inc in 2025",
+      Status == "Unpublished" & Change_type == "Modified" ~ "Unpub in 2023 but Inc in 2025",
+      Status == "Unpublished" & Change_type == "Deleted"  ~ "Unpub in 2023 and Del in 2025",
+      TRUE ~ NA_character_
+    ),
+    Year_estab = readr::parse_number(
+      as.character(Year_estab),
+      na = c("", "Unknown", "UNKNOWN", "*Not indicated", "Not indicated", "*Not Indicated")
+    )
+  ) %>%
   filter(!is.na(visual_status))
 
 # Count entries by visual_status
@@ -136,7 +142,12 @@ ggsave("Output/Active_Municipalities_2025.png", width = 11, height = 6, dpi = 72
 # Plot A: General Methodology
 # Preprocess data: Convert year to numeric and filter out unknown methods
 data <- data %>%
-  mutate(Year_estab = as.numeric(Year_estab)) %>%
+  mutate(
+    Year_estab = readr::parse_number(
+      as.character(Year_estab),
+      na = c("", "Unknown", "UNKNOWN", "*Not indicated", "Not indicated", "*Not Indicated")
+    )
+  ) %>%
   filter(Gen_method != "Unknown")
 
 # Generate full grid of all years (from first establishment year to 2025) and Gen_methods
@@ -247,14 +258,20 @@ ggsave("Output/Cumulative_Counts_Specific_Method_2025.png", width = 10, height =
 # Plot C: Status with Time
 # Prepare Data
 combined_data <- combined %>%
-  mutate(visual_status = case_when(
-    Status == "Published" & Change_type == "Deleted" ~ "Published in 2023 but Deleted in 2025",
-    Status == "Published" ~ "Published in 2023 and Included in 2025",
-    Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
-  #  Status == "Unpublished" & Change_type == "Deleted" ~ "Unpublished in 2023 and Deleted in 2025",
-    Status == "New" ~ "New Entry",
-  ))  %>%
-  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  mutate(
+    visual_status = case_when(
+      Status == "Published"   & Change_type == "Deleted"  ~ "Published in 2023 but Deleted in 2025",
+      Status == "Published"                                ~ "Published in 2023 and Included in 2025",
+      Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
+      # Status == "Unpublished" & Change_type == "Deleted" ~ "Unpublished in 2023 and Deleted in 2025",
+      Status == "New"                                      ~ "New Entry",
+      TRUE ~ NA_character_
+    ),
+    Year_estab = readr::parse_number(
+      as.character(Year_estab),
+      na = c("", "Unknown", "UNKNOWN", "*Not indicated", "Not indicated", "*Not Indicated")
+    )
+  ) %>%
   filter(!is.na(visual_status))
 
 full_data <- expand_grid(`Year_estab` = all_years, 
@@ -307,6 +324,10 @@ ggsave("Output/Cumulative_Project_Status.png", width = 10, height = 6, dpi = 620
 # Who established the project?
 # 1) General Methodology
 # Group other proponent categories as "Others"
+
+file_mot <- here("Data", "20250312 CRR Governance Database 2023-2025.xlsx")
+data <- read_excel(path = file_mot, sheet = "CRR 2025")
+
 data <- data %>%
   mutate(Proponent_Grouped = case_when(
     `Proponent` %in% c("Donor Agency", "Individual / Student project", "PO", "Unknown") ~ "Others",
@@ -331,17 +352,26 @@ projects_by_inst <- projects_by_inst %>%
   mutate(Legend_Label = paste0(`Gen_method`, " (", Total_Count_B, ")"))
 
 # Create ggplot
-ggplot(projects_by_inst, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
-                             y = Count, fill = Legend_Label)) +
-  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), 
-           color = "black", size = 0.3, width = 0.7) +  
+ggplot(projects_by_inst, aes(
+  x = fct_reorder(Proponent_Grouped, -Count, sum),
+  y = Count,
+  fill = Legend_Label
+)) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(preserve = "single"),
+    color = "black",
+    linewidth = 0.3,
+    width = 0.7
+  ) +
   theme_minimal() +
-  labs(x = "Implementor", 
-       y = "Count")+
+  labs(x = "Implementor", y = "Count") +
   scale_fill_brewer(palette = "Set3", name = "General method") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
-        legend.title = element_text(size = 10), 
-        legend.text = element_text(size = 9))
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 9)
+  )
 
 # Save Plot
 ggsave("Output/Proponent_Gen_Method.png", width = 10, height = 6, dpi = 720)
@@ -367,17 +397,26 @@ projects_by_inst <- projects_by_inst %>%
   mutate(Legend_Label = paste0(`Specific_method`, " (", Total_Count_B, ")"))
 
 # Create ggplot
-ggplot(projects_by_inst, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
-                             y = Count, fill = Legend_Label)) +
-  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), 
-           color = "black", size = 0.3, width = 0.7) +  
+ggplot(projects_by_inst, aes(
+  x = fct_reorder(Proponent_Grouped, -Count, sum),
+  y = Count,
+  fill = Legend_Label
+)) +
+  geom_bar(
+    stat = "identity",
+    position = position_dodge(preserve = "single"),
+    color = "black",
+    linewidth = 0.3,
+    width = 0.7
+  ) +
   theme_minimal() +
-  labs(x = "Implementor", 
-       y = "Count")+
-  scale_fill_brewer(palette = "Set3", name = "Specific method") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
-        legend.title = element_text(size = 10), 
-        legend.text = element_text(size = 9))
+  labs(x = "Implementor", y = "Count") +
+  scale_fill_viridis_d(name = "Specific method") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 9)
+  )
 
 # Save Plot
 ggsave("Output/Proponent_Specific_Method.png", width = 10, height = 6, dpi = 720)
@@ -395,13 +434,19 @@ data <- data %>%
 
 # Prepare Data 
 data <- data %>%
-  mutate(visual_status = case_when(
-    Status == "Published" & Change_type == "Deleted" ~ "Published in 2023 but Deleted in 2025",
-    Status == "Published" ~ "Published in 2023 and Included in 2025",
-    Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
-    Status == "New" ~ "New Entry in 2025"
-  ))  %>%
-  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  mutate(
+    visual_status = case_when(
+      Status == "Published"   & Change_type == "Deleted"  ~ "Published in 2023 but Deleted in 2025",
+      Status == "Published"                                ~ "Published in 2023 and Included in 2025",
+      Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
+      Status == "New"                                      ~ "New Entry in 2025",
+      TRUE ~ NA_character_
+    ),
+    Year_estab = readr::parse_number(
+      as.character(Year_estab),
+      na = c("", "Unknown", "UNKNOWN", "*Not indicated", "Not indicated", "*Not Indicated")
+    )
+  ) %>%
   filter(!is.na(visual_status))
 
 data <- data %>%
@@ -425,16 +470,27 @@ projects_by_inst_status <- projects_by_inst_status %>%
   mutate(Legend_Label = paste0(`Status`, " (", Total_Count, ")"))
 
 # Create ggplot (Stacked Bars)
-ggplot(projects_by_inst_status, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
-                                    y = Count, fill = Legend_Label)) +
-  geom_bar(stat = "identity", position = "stack", color = "black", size = 0.3, width = 0.7) +  
+ggplot(projects_by_inst_status, aes(
+  x = fct_reorder(Proponent_Grouped, -Count, sum),
+  y = Count,
+  fill = Legend_Label
+)) +
+  geom_bar(
+    stat = "identity",
+    position = "stack",
+    color = "black",
+    linewidth = 0.3,
+    width = 0.7
+  ) +
   theme_minimal() +
-  labs(x = "Implementor", 
-       y = "Count") +
+  labs(x = "Implementor", y = "Count") +
   scale_fill_brewer(palette = "Set3", name = "Status") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
-        legend.title = element_text(size = 10), 
-        legend.text = element_text(size = 9))
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.title = element_text(size = 10),
+    legend.text  = element_text(size = 9)
+  )
+
 
 # Save Plot
 ggsave("Output/Proponent_Status_Stacked_2025.png", width = 10, height = 6, dpi = 720)
@@ -513,6 +569,7 @@ gt_table <- motivation_table %>%
     column_labels.font.weight = "bold"
   )
 
+library(webshot2)
 # View it (this works in RMarkdown or Quarto too)
 gt_table
 
@@ -581,14 +638,14 @@ funder_counts <- df_filtered %>%
   arrange(desc(Project_Count))  # Sort from highest to lowest
 
 # Plot
-ggplot(funder_counts, aes(x = reorder(Funder_Type, Project_Count), y = Project_Count, fill = Funder_Type)) +
+funder<-ggplot(funder_counts, aes(x = reorder(Funder_Type, Project_Count), y = Project_Count, fill = Funder_Type)) +
   geom_col(show.legend = FALSE) +  # Hide legend (color is just for differentiation)
   coord_flip() +  # Horizontal bars for better readability
   labs(
        x = "Funder Type",
        y = "Number of Projects") +
   theme_minimal(base_size = 14)
-
+funder
 # Save Plot
 ggsave("Output/Funder_type.png", width = 10, height = 6, dpi = 720)
 
