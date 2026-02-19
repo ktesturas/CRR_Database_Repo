@@ -1,0 +1,34 @@
+# Load Prerequisites
+pacman::p_load(tidyverse, readxl, here)
+data <- readxl::read_excel("C:/Users/ktesturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250312 CRR Governance Database 2023-2025.xlsx",
+                           sheet = "CRR 2025")
+
+#****************************************************************************
+# Who are the most active municipalities?
+
+# Count projects per municipality
+top_municipalities_stacked <- data %>%
+  group_by(Municipality, Gen_method) %>%
+  summarise(ProjectCount = n(), .groups = "drop") %>%
+  group_by(Municipality) %>%
+  summarise(TotalProjects = sum(ProjectCount), 
+            Data = list(tibble(Gen_method, ProjectCount)), 
+            .groups = "drop") %>%
+  arrange(desc(TotalProjects)) %>%
+  slice_head(n = 10) %>%
+  tidyr::unnest(Data)
+
+# Plot
+ggplot(top_municipalities_stacked, aes(x = reorder(Municipality, TotalProjects), y = ProjectCount, fill = Gen_method)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Municipality",
+       y = "Number of Projects",
+       fill = "General Method") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Save Plot
+ggsave("Output/Active_Municipalities_2025.png", width = 11, height = 6, dpi = 720)
+

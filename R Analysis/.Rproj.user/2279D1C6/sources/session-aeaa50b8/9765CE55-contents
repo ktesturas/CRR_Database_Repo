@@ -1,0 +1,594 @@
+# CRR 2025 Data Visualization
+# This R script is to visualize data summaries of the CRR Database for the 2025 Update
+
+# Load Prerequisites
+pacman::p_load(tidyverse, readxl, here)
+data <- readxl::read_excel("C:/Users/Lenovo/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/R Analysis/Data/20250422 CRR Governance Database 2023-2025.xlsx",
+                           sheet = "CRR 2025")
+
+#########################################################################################################
+# What are the database updates?
+# Plot 1
+status_summary <- data %>%
+  count(Status)
+
+# Create a new column with the formatted label (Status + count)
+status_summary <- status_summary %>%
+  mutate(Status_Label = paste0(Status, " (", n, ")"))
+
+# Merge back to data, so data can use the new Status_Label in the plot
+data <- data %>%
+  left_join(status_summary %>% select(Status, Status_Label), by = "Status")
+
+
+# Summarize data
+data_sum <- data %>%
+  count(Status_Label)
+
+# Define colors (optional)
+mycols <- c("#375E97", "#FFBB00","#FB6542") # example colors
+
+# Plot
+ggplot(data_sum, aes(x = 2, y = n, fill = Status_Label)) +
+  geom_bar(stat = "identity", color = "white") +
+  coord_polar(theta = "y", start = 0) +
+  scale_fill_manual(values = mycols) +
+  xlim(0.5, 2.5) +  # Donut shape
+  theme_void() +
+  labs(fill = "Entry Status") +
+  theme(
+    legend.text = element_text(size = 14),     # Bigger legend text
+    legend.title = element_text(size = 16)      # Bigger legend title
+  )
+
+# Save Plot
+ggsave("Output/Entry_Status.png", width = 7, height = 4, dpi = 720)
+
+#-------------------------------------------------------------------------------
+# Plot 2
+data2 <- read_excel("Data/20250422 CRR Governance Database 2023-2025.xlsx",
+                   sheet = "2023 PubDel Entries")
+combined <- bind_rows(data, data2)
+
+# Prepare Data 
+combined_data <- combined %>%
+  mutate(visual_status = case_when(
+    Status == "Published" & Change_type == "Deleted" ~ "Pub + Del",
+    Status == "Published" ~ "Pub + Inc",
+    Status == "Unpublished" & Change_type == "Modified" ~ "Unpub + Inc",
+    Status == "Unpublished" & Change_type == "Deleted" ~ "Unpub + Del"
+  ))  %>%
+  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  filter(!is.na(visual_status))
+
+# Count entries by visual_status
+status_summary <- combined_data %>%
+  count(visual_status)
+
+# Create formatted legend labels: Status + count
+status_summary <- status_summary %>%
+  mutate(visual_status_label = paste0(visual_status, " (", n, ")"))
+
+# Attach back to combined_data with new labels
+combined_data <- combined_data %>%
+  left_join(status_summary %>% select(visual_status, visual_status_label), by = "visual_status")
+
+# Define custom colours - directly matched to the full labels
+custom_colours <- setNames(
+  c("grey50", "#FFBB00",  "#B388EB", "#FB6542"),
+  status_summary$visual_status_label
+)
+
+# Summarize for plotting
+combined_data_sum <- combined_data %>%
+  count(visual_status_label)
+
+# Plot
+ggplot(combined_data_sum, aes(x = 2, y = n, fill = visual_status_label)) +
+  geom_bar(stat = "identity", color = "white") +
+  coord_polar(theta = "y", start = 0) +
+  scale_fill_manual(values = custom_colours) +
+  xlim(0.5, 2.5) +  # Better donut shape
+  theme_void() +
+  labs(fill = "Entry Status") +
+  theme(
+    legend.title = element_text(size = 14),  # Bigger title
+    legend.text = element_text(size = 12)    # Bigger legend text
+  )
+
+# Save Plot
+ggsave("Output/Entry_Status_2023.png", width = 7, height = 4, dpi = 720)
+
+
+########################################################################################################################
+# Who are the most active municipalities?
+
+# Count projects per municipality
+top_municipalities_stacked <- data %>%
+  group_by(Municipality, Gen_method) %>%
+  summarise(ProjectCount = n(), .groups = "drop") %>%
+  group_by(Municipality) %>%
+  summarise(TotalProjects = sum(ProjectCount), 
+            Data = list(tibble(Gen_method, ProjectCount)), 
+            .groups = "drop") %>%
+  arrange(desc(TotalProjects)) %>%
+  slice_head(n = 10) %>%
+  tidyr::unnest(Data)
+
+# Plot
+ggplot(top_municipalities_stacked, aes(x = reorder(Municipality, TotalProjects), y = ProjectCount, fill = Gen_method)) +
+  geom_col() +
+  coord_flip() +
+  labs(x = "Municipality",
+       y = "Number of Projects",
+       fill = "General Method") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Save Plot
+ggsave("Output/Active_Municipalities_2025.png", width = 11, height = 6, dpi = 720)
+
+
+########################################################################################################################
+# How is coral restoration expanding over time?
+
+# Plot A: General Methodology
+# Preprocess data: Convert year to numeric and filter out unknown methods
+data <- data %>%
+  mutate(Year_estab = as.numeric(Year_estab)) %>%
+  filter(Gen_method != "Unknown")
+
+# Generate full grid of all years (from first establishment year to 2025) and Gen_methods
+all_years <- seq(min(data$Year_estab, na.rm = TRUE), 2025, by = 1)
+
+full_data <- expand_grid(
+  Year_estab = all_years,
+  Gen_method = unique(data$Gen_method)
+)
+
+# Count projects per year and generation method
+data_counted <- data %>%
+  count(Year_estab, Gen_method, name = "Count")
+
+# Merge full grid with actual counts, filling missing combinations with zero counts
+projects_per_year_method <- full_data %>%
+  left_join(data_counted, by = c("Year_estab", "Gen_method")) %>%
+  mutate(Count = replace_na(Count, 0)) %>%
+  group_by(Gen_method) %>%
+  arrange(Year_estab) %>%
+  mutate(Cumulative_Count = cumsum(Count)) %>%
+  ungroup()
+
+# Compute final total count per generation method (for legend label)
+method_counts <- projects_per_year_method %>%
+  group_by(Gen_method) %>%
+  summarise(Total_Count = max(Cumulative_Count), .groups = "drop")
+
+# Add updated legend label with count
+projects_per_year_method <- projects_per_year_method %>%
+  left_join(method_counts, by = "Gen_method") %>%
+  mutate(Legend_Label = paste0(Gen_method, " (", Total_Count, ")"))
+
+# Plot cumulative counts over time by generation method
+ggplot(projects_per_year_method, aes(x = Year_estab, 
+                                     y = Cumulative_Count, 
+                                     fill = Legend_Label)) +
+  geom_area(alpha = 0.6, color = "black", size = 0.3) +
+  scale_fill_brewer(palette = "Set3", name = "General method") +
+  labs(x = "Year", y = "Count") +
+  theme_minimal() +
+  theme(
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9),
+    legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Save Plot
+ggsave("Output/Cumulative_Counts_Method_2025.png", width = 10, height = 6, dpi = 720)
+
+
+#-------------------------------------------------------------------------------
+# Plot B: Specific Methodology
+# Preprocess data: Convert year to numeric and filter out unknown methods
+data <- data %>%
+  mutate(Year_estab = as.numeric(Year_estab)) %>%
+  filter(Specific_method != "Unknown")
+
+# Generate full grid of all years (from first establishment year to 2025) and Specfic_methods
+all_years <- seq(min(data$Year_estab, na.rm = TRUE), 2025, by = 1)
+
+full_data <- expand_grid(
+  Year_estab = all_years,
+  Specific_method = unique(data$Specific_method)
+)
+
+# Count projects per year and method
+data_counted <- data %>%
+  count(Year_estab, Specific_method, name = "Count")
+
+# Merge full grid with actual counts, filling missing combinations with zero counts
+projects_per_year_method <- full_data %>%
+  left_join(data_counted, by = c("Year_estab", "Specific_method")) %>%
+  mutate(Count = replace_na(Count, 0)) %>%
+  group_by(Specific_method) %>%
+  arrange(Year_estab) %>%
+  mutate(Cumulative_Count = cumsum(Count)) %>%
+  ungroup()
+
+# Compute final total count per generation method (for legend label)
+method_counts <- projects_per_year_method %>%
+  group_by(Specific_method) %>%
+  summarise(Total_Count = max(Cumulative_Count), .groups = "drop")
+
+# Add updated legend label with count
+projects_per_year_method <- projects_per_year_method %>%
+  left_join(method_counts, by = "Specific_method") %>%
+  mutate(Legend_Label = paste0(Specific_method, " (", Total_Count, ")"))
+
+# Plot
+ggplot(projects_per_year_method, aes(x = Year_estab, 
+                                     y = Cumulative_Count, 
+                                     fill = Legend_Label)) +
+  geom_area(alpha = 0.6, color = "black", size = 0.3) +
+  scale_fill_viridis_d(name = "Specific method", option = "B") +
+  labs(x = "Year", y = "Count") +
+  theme_minimal() +
+  theme(
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+
+# Save Plot
+ggsave("Output/Cumulative_Counts_Specific_Method_2025.png", width = 10, height = 6, dpi = 720)
+
+#-------------------------------------------------------------------------------
+# Plot C: Status with Time
+# Prepare Data
+combined_data <- combined %>%
+  mutate(visual_status = case_when(
+    Status == "Published" & Change_type == "Deleted" ~ "Published in 2023 but Deleted in 2025",
+    Status == "Published" ~ "Published in 2023 and Included in 2025",
+    Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
+  #  Status == "Unpublished" & Change_type == "Deleted" ~ "Unpublished in 2023 and Deleted in 2025",
+    Status == "New" ~ "New Entry",
+  ))  %>%
+  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  filter(!is.na(visual_status))
+
+full_data <- expand_grid(`Year_estab` = all_years, 
+                         `visual_status` = unique(combined_data$`visual_status`)) # Create df with year for each Status
+
+# Count CRR per year AND visual_status
+data_counted <- combined_data %>%
+  group_by(`Year_estab`, `visual_status`) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Merge with all possible year-Status combinations
+projects_per_year_status <- full_data %>%
+  left_join(data_counted, by = c("Year_estab", "visual_status")) %>%
+  mutate(Count = replace_na(Count, 0)) %>%  # Fill missing years with 0
+  arrange(`visual_status`, `Year_estab`) %>%
+  group_by(`visual_status`) %>%
+  mutate(Cumulative_Count = cumsum(Count)) %>%
+  ungroup()
+
+# Plot Legend: Compute total count per Status
+status_counts <- projects_per_year_status %>%
+  group_by(`visual_status`) %>%
+  summarise(Total_Count = max(Cumulative_Count), .groups = "drop")
+
+# Create updated legend labels
+projects_per_year_status <- projects_per_year_status %>%
+  left_join(status_counts, by = "visual_status") %>%
+  mutate(Legend_Label = paste0(`visual_status`, " (", Total_Count, ")"))
+
+# Create ggplot stratified by visual_status
+ggplot(projects_per_year_status, aes(x = `Year_estab`, 
+                                     y = Cumulative_Count, 
+                                     fill = Legend_Label)) +
+  geom_area(alpha = 0.6, color = "black", size = 0.3) + 
+  theme_minimal() +
+  labs(x = "Year", 
+       y = "Count", 
+       fill = "visual_status") +
+  scale_fill_brewer(palette = "Set3", name = "Entry Status") + 
+  theme(legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 9),
+        legend.position = "bottom") +
+  guides(fill = guide_legend(nrow = 2))
+
+# Save Plot
+ggsave("Output/Cumulative_Project_Status.png", width = 10, height = 6, dpi = 620)
+
+
+########################################################################################################################
+# Who established the project?
+# 1) General Methodology
+# Group other proponent categories as "Others"
+data <- data %>%
+  mutate(Proponent_Grouped = case_when(
+    `Proponent` %in% c("Donor Agency", "Individual / Student project", "PO", "Unknown") ~ "Others",
+    TRUE ~ `Proponent`
+  ))
+data <- data %>%
+  filter(`Gen_method` != "Unknown")
+
+# Count CRR by Proponent and General method
+projects_by_inst <- data %>%
+  group_by(Proponent_Grouped, `Gen_method`) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Keep all rows (including NA years) for Plot B
+method_counts_B <- data %>%
+  group_by(`Gen_method`) %>%
+  summarise(Total_Count_B = n(), .groups = "drop")
+
+# Ensure correct labels for Plot B
+projects_by_inst <- projects_by_inst %>%
+  left_join(method_counts_B, by = "Gen_method") %>%
+  mutate(Legend_Label = paste0(`Gen_method`, " (", Total_Count_B, ")"))
+
+# Create ggplot
+ggplot(projects_by_inst, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
+                             y = Count, fill = Legend_Label)) +
+  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), 
+           color = "black", size = 0.3, width = 0.7) +  
+  theme_minimal() +
+  labs(x = "Implementor", 
+       y = "Count")+
+  scale_fill_brewer(palette = "Set3", name = "General method") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 9))
+
+# Save Plot
+ggsave("Output/Proponent_Gen_Method.png", width = 10, height = 6, dpi = 720)
+
+#-------------------------------------------------------------------------------
+# 2) Specific Methodology
+data <- data %>%
+  filter(`Specific_method` != "Unknown")
+
+# Count CRR by Proponent and General method
+projects_by_inst <- data %>%
+  group_by(Proponent_Grouped, `Specific_method`) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Keep all rows (including NA years) for Plot B
+method_counts_B <- data %>%
+  group_by(`Specific_method`) %>%
+  summarise(Total_Count_B = n(), .groups = "drop")
+
+# Ensure correct labels for Plot B
+projects_by_inst <- projects_by_inst %>%
+  left_join(method_counts_B, by = "Specific_method") %>%
+  mutate(Legend_Label = paste0(`Specific_method`, " (", Total_Count_B, ")"))
+
+# Create ggplot
+ggplot(projects_by_inst, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
+                             y = Count, fill = Legend_Label)) +
+  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), 
+           color = "black", size = 0.3, width = 0.7) +  
+  theme_minimal() +
+  labs(x = "Implementor", 
+       y = "Count")+
+  scale_fill_brewer(palette = "Set3", name = "Specific method") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 9))
+
+# Save Plot
+ggsave("Output/Proponent_Specific_Method.png", width = 10, height = 6, dpi = 720)
+
+#-------------------------------------------------------------------------------
+# 3) Proponents stratified by method and status [stacked]
+
+data <- combined %>%
+  mutate(Proponent_Grouped = case_when(
+    `Proponent` %in% c("Donor Agency", "Individual / Student project", "PO", "Unknown") ~ "Others",
+    TRUE ~ `Proponent`
+  ))
+data <- data %>%
+  filter(`Gen_method` != "Unknown")
+
+# Prepare Data 
+data <- data %>%
+  mutate(visual_status = case_when(
+    Status == "Published" & Change_type == "Deleted" ~ "Published in 2023 but Deleted in 2025",
+    Status == "Published" ~ "Published in 2023 and Included in 2025",
+    Status == "Unpublished" & Change_type == "Modified" ~ "Unpublished in 2023 but Included in 2025",
+    Status == "New" ~ "New Entry in 2025"
+  ))  %>%
+  mutate(`Year_estab` = as.numeric(`Year_estab`)) %>%
+  filter(!is.na(visual_status))
+
+data <- data %>%
+  select(-Status) %>%              # Drop the old Status column
+  rename(Status = visual_status)    # Rename visual_status to Status
+
+
+# Count CRR by Proponent and Status
+projects_by_inst_status <- data %>%
+  group_by(Proponent_Grouped, `Status`) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Calculate total counts per Status for legend labels
+status_counts <- data %>%
+  group_by(`Status`) %>%
+  summarise(Total_Count = n(), .groups = "drop")
+
+# Merge total counts into the dataset for proper legend labels
+projects_by_inst_status <- projects_by_inst_status %>%
+  left_join(status_counts, by = "Status") %>%
+  mutate(Legend_Label = paste0(`Status`, " (", Total_Count, ")"))
+
+# Create ggplot (Stacked Bars)
+ggplot(projects_by_inst_status, aes(x = fct_reorder(Proponent_Grouped, -Count, sum), 
+                                    y = Count, fill = Legend_Label)) +
+  geom_bar(stat = "identity", position = "stack", color = "black", size = 0.3, width = 0.7) +  
+  theme_minimal() +
+  labs(x = "Implementor", 
+       y = "Count") +
+  scale_fill_brewer(palette = "Set3", name = "Status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.title = element_text(size = 10), 
+        legend.text = element_text(size = 9))
+
+# Save Plot
+ggsave("Output/Proponent_Status_Stacked_2025.png", width = 10, height = 6, dpi = 720)
+
+
+
+#-------------------------------------------------------------------------------
+# 4) Proponents stratified by method and status [faceted]
+# Count CRR by Proponent and Gen_method
+projects_by_inst <- data %>%
+  group_by(Proponent_Grouped, `Gen_method`, Status) %>%  # Include Status if needed for fill
+  summarise(Count = n(), .groups = "drop")
+
+# Create ggplot with facets for Gen_method
+ggplot(projects_by_inst, aes(x = Proponent_Grouped, y = Count, fill = Status)) +  # Fill by Status
+  geom_bar(stat = "identity", position = position_dodge(preserve = "single"), color = "black", size = 0.3) +
+  facet_wrap(~ `Gen_method`, scales = "free_y") +  # Facet by Gen_method
+  theme_minimal() +
+  labs(x = "Proponent", y = "Project Count", fill = "Status") +
+  scale_fill_brewer(palette = "Set1") +  # Choose palette for Status
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 9),
+        strip.text = element_text(size = 10))  # Adjust facet label size
+
+# Save Plot
+ggsave("Output/Proponent_Faceted_By_Method_2025.png", width = 13, height = 8, dpi = 720)
+
+########################################################################################################################
+# What motivates these projects?
+
+
+# Summarise the data - count projects per motivation
+motivation_plot_data <- data %>%
+  filter(!is.na(Motivation_code)) %>%   # In case some rows have missing motivations
+  group_by(Motivation_code) %>%
+  summarise(ProjectCount = n(), .groups = "drop") %>%
+  arrange(ProjectCount)
+
+# Horizontal bar plot
+ggplot(motivation_plot_data, aes(x = ProjectCount, y = reorder(Motivation_code, ProjectCount))) +
+  geom_col(fill = "steelblue") +
+  labs(
+       x = "Number of Projects",
+       y = "Motivation") +
+  theme_minimal(base_size = 14)
+ggsave("Output/Motivations.png", width = 13, height = 8, dpi = 720)
+
+library(gt)
+
+# Create the table as a tibble
+motivation_table <- tibble(
+  Code = c("M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8"),
+  Motivation = c(
+    "Accelerate reef recovery post-disturbance",
+    "Reestablish a self-sustaining, functioning reef ecosystem",
+    "Mitigate anticipated coral loss prior to a known disturbance",
+    "Reduce population declines and ecosystem degradation",
+    "Provide alternative, sustainable livelihood opportunities",
+    "Promote coral reef conservation stewardship",
+    "Scientific Research",
+    "Ecological engineering"
+  )
+)
+
+# Create styled table with gt
+gt_table <- motivation_table %>%
+  gt() %>%
+  tab_header(title = "Motivation Codes for Coral Restoration Projects") %>%
+  cols_width(
+    Code ~ px(50),
+    Motivation ~ px(600)
+  ) %>%
+  tab_options(
+    table.font.size = 12,
+    column_labels.font.weight = "bold"
+  )
+
+# View it (this works in RMarkdown or Quarto too)
+gt_table
+
+gtsave(gt_table, "Output/Motivation_Code_Table.png")
+
+
+########################################################################################################################
+# What are the usual timeframe for these projects?
+
+# Sample dataset (replace with your data)
+df <- data %>%
+  filter(Project_start != "Unknown", Project_end != "Unknown") %>%  # Remove rows with "Unknown" years
+  mutate(Project_ID = paste0(Restoration_project, " (", Project_start, "-", Project_end, ")"))
+
+
+ggplot(df, aes(y = Project_ID, x = Project_start, xend = Project_end)) +
+  geom_segment(aes(yend = Project_ID), color = "steelblue", size = 2) +
+  labs( y = "Project",
+       x = "Year")+
+  theme_minimal(base_size = 14) +
+  theme(axis.text.y = element_text(size = 7)) +  # Adjust font size
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+  # Rotate x-axis labels
+# Plot single-year projects as points
+  
+  
+geom_point(data = df %>% filter(Project_start == Project_end),
+           aes(x = Project_start, y = Project_ID),
+           color = "steelblue", size = 2)   # Make single-year projects visible
+
+# Save Plot
+ggsave("Output/Project_Durations.png", width = 15, height = 8, dpi = 720)
+
+########################################################################################################################
+# What type of material did they use? 
+
+# Filter dataset to exclude "Not applicable" and "Unknown"
+df_filtered <- data %>%
+  filter(!Material_type %in% c("Not applicable"))
+
+# Count occurrences of each material type
+material_counts <- df_filtered %>%
+  count(Material_type, name = "Project_Count") %>%
+  arrange(desc(Project_Count))  # Sort from highest to lowest
+
+# Plot
+ggplot(material_counts, aes(x = reorder(Material_type, Project_Count), y = Project_Count, fill = Material_type)) +
+  geom_col(show.legend = FALSE) +  # Hide legend (color is just for differentiation)
+  coord_flip() +  # Horizontal bars for better readability
+  labs(x = "Material Type",
+       y = "Number of Projects") +
+  theme_minimal(base_size = 14)
+
+
+# Save Plot
+ggsave("Output/Material_type.png", width = 10, height = 6, dpi = 720)
+
+########################################################################################################################
+# Who funded these projects? 
+
+# Filter dataset to exclude "Unknown" funders
+df_filtered <- data 
+
+# Count occurrences of each funder type
+funder_counts <- df_filtered %>%
+  count(Funder_Type, name = "Project_Count") %>%
+  arrange(desc(Project_Count))  # Sort from highest to lowest
+
+# Plot
+ggplot(funder_counts, aes(x = reorder(Funder_Type, Project_Count), y = Project_Count, fill = Funder_Type)) +
+  geom_col(show.legend = FALSE) +  # Hide legend (color is just for differentiation)
+  coord_flip() +  # Horizontal bars for better readability
+  labs(
+       x = "Funder Type",
+       y = "Number of Projects") +
+  theme_minimal(base_size = 14)
+
+# Save Plot
+ggsave("Output/Funder_type.png", width = 10, height = 6, dpi = 720)
+
