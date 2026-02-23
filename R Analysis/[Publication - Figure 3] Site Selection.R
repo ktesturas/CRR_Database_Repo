@@ -15,7 +15,7 @@ library(stringr)
 library(ggplot2)
 library(scales)
 library(cowplot)
-
+library(here)
 # ---------- File paths ----------
 file_threats <- "C:/Users/Kris Jypson Esturas/OneDrive - Macquarie University/Documents/2025/00 CRR Gov/ArcGIS Projects/CRR 2025_June/Bioregions_Threats.xlsx"
 file_mot <- here(
